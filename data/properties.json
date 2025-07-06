@@ -1,0 +1,76 @@
+[
+  {
+    "codigo": "AP001",
+    "tipo": "Apartamento",
+    "operacao": "venda",
+    "bairro": "Centro",
+    "cidade": "Florianópolis",
+    "quartos": 3,
+    "suites": 1,
+    "preco": "750.000,00",
+    "descricao": "Apartamento com vista para o mar, 3 quartos sendo 1 suíte, 2 vagas de garagem.",
+    "fotos": [
+      "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800",
+      "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800",
+      "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800"
+    ],
+    "tour_virtual": "https://my.matterport.com/show/?m=SxQL3iGyvQk"
+  },
+  {
+    "codigo": "CA002",
+    "tipo": "Casa",
+    "operacao": "venda",
+    "bairro": "Jurerê",
+    "cidade": "Florianópolis",
+    "quartos": 4,
+    "suites": 3,
+    "preco": "2.500.000,00",
+    "descricao": "Casa em condomínio fechado, 4 suítes, piscina, churrasqueira, 4 vagas.",
+    "fotos": [
+      "https://images.unsplash.com/photo-1523217582562-09d0def993a6?w=800",
+      "https://images.unsplash.com/photo-1613977257363-707ba9348227?w=800"
+    ]
+  },
+  {
+    "codigo": "AP003",
+    "tipo": "Apartamento",
+    "operacao": "aluguel",
+    "bairro": "Trindade",
+    "cidade": "Florianópolis",
+    "quartos": 2,
+    "suites": 0,
+    "preco": "2.800,00",
+    "descricao": "Apartamento próximo à UFSC, 2 quartos, mobiliado, com vaga de garagem.",
+    "fotos": [
+      "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800"
+    ]
+  },
+  {
+    "codigo": "CA004",
+    "tipo": "Casa",
+    "operacao": "aluguel",
+    "bairro": "Campeche",
+    "cidade": "Florianópolis",
+    "quartos": 3,
+    "suites": 1,
+    "preco": "4.500,00",
+    "descricao": "Casa a 200m da praia, 3 quartos sendo 1 suíte, quintal amplo.",
+    "fotos": [
+      "https://images.unsplash.com/photo-1449844908441-8829872d2607?w=800"
+    ]
+  },
+  {
+    "codigo": "AP005",
+    "tipo": "Apartamento",
+    "operacao": "venda",
+    "bairro": "Agronômica",
+    "cidade": "Florianópolis",
+    "quartos": 2,
+    "suites": 1,
+    "preco": "580.000,00",
+    "descricao": "Apartamento novo, 2 quartos sendo 1 suíte, sacada com churrasqueira.",
+    "fotos": [
+      "https://images.unsplash.com/photo-1565182999561-18d7dc61c393?w=800"
+    ]
+  }
+]

@@ -1,0 +1,14 @@
+
+    # Adicione este método ao MessageHandler:
+    
+    def _check_image_request(self, text: str) -> str:
+        """Verifica se é um pedido de imagens"""
+        # Detecta códigos de imóveis
+        import re
+        pattern = r'\b((?:AP|CA)\d{3,4})\b'
+        matches = re.findall(pattern, text.upper())
+        
+        if matches and self.image_service.has_image_request(text):
+            return self.image_service.format_image_response(matches[0])
+        
+        return None

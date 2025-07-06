@@ -1,0 +1,20 @@
+{
+  "name": "Imobiliária Digital IA",
+  "about": "Somos pioneiros em atendimento imobiliário com Inteligência Artificial. Nossa missão é revolucionar a forma como você encontra o imóvel dos seus sonhos, com tecnologia de ponta e atendimento personalizado 24/7.",
+  "contact": {
+    "phone": "(48) 3333-4444",
+    "whatsapp": "(48) 99999-8888",
+    "email": "contato@imobiliariadigital.com.br",
+    "address": "Av. Tecnologia, 1000 - Centro, Florianópolis/SC",
+    "hours": "Atendimento 24/7 via WhatsApp | Presencial: Seg-Sex 9h-18h"
+  },
+  "financing": "Oferecemos consultoria completa para financiamento imobiliário! Trabalhamos com os principais bancos: Caixa, BB, Santander, Bradesco e Itaú. Simulamos as melhores condições, com taxas a partir de 0,99% a.m. Acompanhamos todo o processo, desde a simulação até a chave na mão!",
+  "services": [
+    "Compra e venda de imóveis",
+    "Locação residencial e comercial",
+    "Avaliação imobiliária gratuita",
+    "Tour virtual 360°",
+    "Consultoria de investimentos",
+    "Assessoria jurídica"
+  ]
+}

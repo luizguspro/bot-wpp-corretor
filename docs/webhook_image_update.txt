@@ -1,0 +1,24 @@
+
+# No webhook, adicione suporte para enviar múltiplas mídias:
+
+if "tem fotos" in incoming_msg.lower() or "ver imagens" in incoming_msg.lower():
+    # Detecta código do imóvel
+    import re
+    pattern = r'\b(AP|CA)\d{3,4}\b'
+    matches = re.findall(pattern, incoming_msg.upper())
+    
+    if matches:
+        property_code = matches[0]
+        image_data = image_service.get_property_images(property_code)
+        
+        if image_data['found'] and image_data['images']:
+            # Envia texto primeiro
+            msg.body(f"📸 Aqui estão as fotos do {property_code}:")
+            
+            # Envia cada imagem
+            for img_url in image_data['images'][:3]:  # Máximo 3 imagens
+                msg.media(img_url)
+            
+            # Adiciona tour virtual se houver
+            if image_data['tour_virtual']:
+                resp.message(f"🎥 Tour Virtual 360°: {image_data['tour_virtual']}")

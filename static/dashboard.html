@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Bot Imobiliário IA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="container mx-auto p-6">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-4xl font-bold mb-2">
+                <i class="fas fa-robot mr-3"></i>Bot Imobiliário IA
+            </h1>
+            <p class="text-gray-400">Dashboard em Tempo Real</p>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400">Mensagens Hoje</p>
+                        <p class="text-3xl font-bold" id="msgToday">247</p>
+                    </div>
+                    <i class="fas fa-comments text-4xl text-blue-500"></i>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400">Áudios Transcritos</p>
+                        <p class="text-3xl font-bold" id="audioCount">89</p>
+                    </div>
+                    <i class="fas fa-microphone text-4xl text-green-500"></i>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400">Taxa de Conversão</p>
+                        <p class="text-3xl font-bold">32%</p>
+                    </div>
+                    <i class="fas fa-chart-line text-4xl text-purple-500"></i>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400">Satisfação</p>
+                        <p class="text-3xl font-bold">4.8⭐</p>
+                    </div>
+                    <i class="fas fa-star text-4xl text-yellow-500"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <h3 class="text-xl font-bold mb-4">Mensagens por Hora</h3>
+                <canvas id="hourlyChart"></canvas>
+            </div>
+            
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <h3 class="text-xl font-bold mb-4">Tipos de Busca</h3>
+                <canvas id="searchChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Live Feed -->
+        <div class="bg-gray-800 p-6 rounded-lg">
+            <h3 class="text-xl font-bold mb-4">
+                <i class="fas fa-stream mr-2"></i>Conversas em Tempo Real
+            </h3>
+            <div id="liveFeed" class="space-y-4 max-h-96 overflow-y-auto">
+                <!-- Live messages will appear here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Animated counters
+        function animateCounter(id, target) {
+            let current = 0;
+            const increment = target / 50;
+            const timer = setInterval(() => {
+                current += increment;
+                if (current >= target) {
+                    current = target;
+                    clearInterval(timer);
+                }
+                document.getElementById(id).textContent = Math.floor(current);
+            }, 30);
+        }
+
+        // Initialize counters
+        animateCounter('msgToday', 247);
+        animateCounter('audioCount', 89);
+
+        // Hourly Chart
+        const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
+        new Chart(hourlyCtx, {
+            type: 'line',
+            data: {
+                labels: ['8h', '9h', '10h', '11h', '12h', '13h', '14h', '15h', '16h', '17h', '18h'],
+                datasets: [{
+                    label: 'Mensagens',
+                    data: [12, 19, 23, 35, 42, 38, 45, 52, 41, 38, 25],
+                    borderColor: 'rgb(59, 130, 246)',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true, grid: { color: '#374151' } },
+                    x: { grid: { color: '#374151' } }
+                }
+            }
+        });
+
+        // Search Types Chart
+        const searchCtx = document.getElementById('searchChart').getContext('2d');
+        new Chart(searchCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Compra', 'Aluguel', 'Informações', 'Financiamento', 'Outros'],
+                datasets: [{
+                    data: [45, 30, 15, 7, 3],
+                    backgroundColor: [
+                        'rgb(59, 130, 246)',
+                        'rgb(16, 185, 129)',
+                        'rgb(245, 158, 11)',
+                        'rgb(139, 92, 246)',
+                        'rgb(239, 68, 68)'
+                    ]
+                }]
+            }
+        });
+
+        // Live Feed Simulation
+        const messages = [
+            { time: '17:44', user: '+55 48 9139-9832', type: 'audio', text: 'Procuro apartamento com 3 quartos...', sentiment: 'positive' },
+            { time: '17:42', user: '+55 11 9876-5432', type: 'text', text: 'Qual o valor do aluguel em Kobrasol?', sentiment: 'neutral' },
+            { time: '17:40', user: '+55 47 8765-4321', type: 'audio', text: 'Urgente! Preciso de casa para alugar', sentiment: 'urgent' },
+            { time: '17:38', user: '+55 48 9999-8888', type: 'text', text: 'Obrigado pelas informações!', sentiment: 'positive' }
+        ];
+
+        function addLiveMessage(msg) {
+            const feed = document.getElementById('liveFeed');
+            const sentimentColors = {
+                positive: 'bg-green-900',
+                neutral: 'bg-gray-700',
+                urgent: 'bg-red-900'
+            };
+            
+            const messageHtml = `
+                <div class="flex items-start space-x-3 p-3 rounded ${sentimentColors[msg.sentiment]}">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-${msg.type === 'audio' ? 'microphone' : 'comment'} text-2xl"></i>
+                    </div>
+                    <div class="flex-1">
+                        <div class="flex items-center space-x-2">
+                            <span class="font-bold">${msg.user}</span>
+                            <span class="text-xs text-gray-400">${msg.time}</span>
+                            ${msg.sentiment === 'urgent' ? '<span class="text-xs bg-red-600 px-2 py-1 rounded">URGENTE</span>' : ''}
+                        </div>
+                        <p class="text-sm mt-1">${msg.text}</p>
+                    </div>
+                </div>
+            `;
+            
+            feed.insertAdjacentHTML('afterbegin', messageHtml);
+        }
+
+        // Add initial messages
+        messages.forEach(msg => addLiveMessage(msg));
+
+        // Simulate new messages
+        setInterval(() => {
+            const randomMsg = {
+                time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                user: `+55 ${Math.floor(Math.random() * 99)} 9${Math.floor(Math.random() * 9999)}-${Math.floor(Math.random() * 9999)}`,
+                type: Math.random() > 0.5 ? 'audio' : 'text',
+                text: 'Nova mensagem recebida...',
+                sentiment: ['positive', 'neutral', 'urgent'][Math.floor(Math.random() * 3)]
+            };
+            addLiveMessage(randomMsg);
+        }, 15000);
+    </script>
+</body>
+</html>
