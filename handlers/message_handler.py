@@ -1,12 +1,10 @@
 import logging
-import json
 import re
-from datetime import datetime, timedelta
+import random
+from datetime import datetime
 from services.ai_service import AIService
 from services.property_service import PropertyService
-from services.lead_scorer import LeadScorer
-from services.urgency_creator import UrgencyCreator
-from services.excuse_handler import ExcuseHandler
+from utils.emojis import e
 
 logger = logging.getLogger(__name__)
 
@@ -14,457 +12,366 @@ class MessageHandler:
     def __init__(self):
         self.ai_service = AIService()
         self.property_service = PropertyService()
-        self.lead_scorer = LeadScorer()
-        self.urgency_creator = UrgencyCreator()
-        self.excuse_handler = ExcuseHandler()
-        self.conversation_history = {}
+        self.conversations = {}
         
-    def process_message(self, text: str, from_number: str) -> str:
-        """Processa mensagens com todas as features matadoras"""
+    def process_message(self, text, from_number):
+        try:
+            if from_number not in self.conversations:
+                self.conversations[from_number] = {
+                    'history': [],
+                    'preferences': {},
+                    'name': None,
+                    'last_search': None,
+                    'context': None
+                }
+            
+            conv = self.conversations[from_number]
+            conv['history'].append({'user': text, 'time': datetime.now()})
+            
+            response = self._process_with_context(text, conv)
+            
+            conv['history'].append({'bot': response, 'time': datetime.now()})
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Erro: {e}")
+            return self._error_response()
+    
+    def _process_with_context(self, text, conv):
+        text_lower = text.lower()
         
-        # Salva no histórico
-        if from_number not in self.conversation_history:
-            self.conversation_history[from_number] = []
-        self.conversation_history[from_number].append({
-            'text': text,
-            'timestamp': datetime.now(),
-            'from': 'user'
-        })
+        # Primeira interação
+        if len(conv['history']) <= 1:
+            return self._first_interaction()
         
-        # 1. COMANDOS ESPECIAIS DO CORRETOR
-        if text.startswith('#'):
-            return self._handle_broker_commands(text, from_number)
+        # Saudações
+        if any(word in text_lower for word in ['oi', 'ola', 'bom dia', 'boa tarde', 'boa noite']):
+            return self._greeting_response()
         
-        # 2. ANÁLISE DE LEAD EM TEMPO REAL
-        lead_analysis = self.lead_scorer.analyze_lead(
-            from_number, 
-            self.conversation_history[from_number]
-        )
+        # ANÁLISE PRECISA DE PREÇO
+        price_request = self._extract_price_request(text)
+        if price_request:
+            return self._handle_price_search(price_request, conv)
         
-        # 3. ALERTA SE CLIENTE QUENTE
-        if lead_analysis['score'] >= 70:
-            self._send_hot_lead_alert(from_number, lead_analysis)
+        # Busca geral
+        if self._is_property_search(text):
+            return self._smart_search(text, conv)
         
-        # 4. DETECÇÃO DE PADRÕES ESPECIAIS
+        # Código de imóvel
+        property_code = self._extract_property_code(text)
+        if property_code:
+            return self._show_property_details(property_code, conv)
         
-        # Só quer preço?
-        if self._is_price_only_request(text):
-            return self._handle_price_request(text, from_number)
+        # Perguntas sobre fotos
+        if any(word in text_lower for word in ['foto', 'imagem', 'ver', 'mostra']):
+            return self._handle_photo_request(text, conv)
         
-        # Tem objeção/desculpa?
-        excuse_detected = self._detect_excuse(text)
-        if excuse_detected:
-            return self.excuse_handler.handle(excuse_detected, from_number)
+        # Conversação geral
+        return self._contextual_response(text, conv)
+    
+    def _extract_price_request(self, text):
+        """Extrai pedidos relacionados a preço com precisão"""
+        text_lower = text.lower()
         
-        # Mencionou concorrente?
-        competitor = self._detect_competitor(text)
-        if competitor:
-            return self._handle_competitor_mention(competitor, from_number)
+        # Padrões de preço
+        patterns = [
+            r'abaixo de (\d+)',
+            r'menos de (\d+)',
+            r'até (\d+)',
+            r'menor que (\d+)',
+            r'maximo (\d+)',
+            r'máximo (\d+)',
+            r'no maximo (\d+)',
+            r'no máximo (\d+)'
+        ]
         
-        # Cliente sumiu e voltou?
-        if self._is_returning_ghost(from_number):
-            return self._handle_ghost_return(from_number)
+        for pattern in patterns:
+            match = re.search(pattern, text_lower.replace('.', '').replace('mil', '000').replace(' ', ''))
+            if match:
+                return {
+                    'max_price': int(match.group(1)),
+                    'type': 'max'
+                }
         
-        # 5. PROCESSAMENTO NORMAL COM IA
-        intent_data = self.ai_service.classify_intent(text)
+        # Faixa de preço
+        range_pattern = r'entre (\d+) e (\d+)'
+        range_match = re.search(range_pattern, text_lower.replace('.', '').replace('mil', '000').replace(' ', ''))
+        if range_match:
+            return {
+                'min_price': int(range_match.group(1)),
+                'max_price': int(range_match.group(2)),
+                'type': 'range'
+            }
         
-        # 6. RESPOSTAS INTELIGENTES BASEADAS NA INTENÇÃO
-        if intent_data.get('intent') == 'property_search':
-            response = self._handle_property_search_smart(intent_data, from_number)
-        elif intent_data.get('intent') == 'scheduling':
-            response = self._handle_smart_scheduling(text, from_number)
+        return None
+    
+    def _handle_price_search(self, price_request, conv):
+        """Busca precisa por preço SEM INVENTAR"""
+        max_price = price_request.get('max_price', 0)
+        min_price = price_request.get('min_price', 0)
+        
+        # Mantém preferências anteriores
+        preferences = conv.get('preferences', {}).copy()
+        preferences['max_price'] = max_price
+        if min_price:
+            preferences['min_price'] = min_price
+        
+        # Busca imóveis
+        properties = self.property_service.search_by_price(preferences)
+        
+        if not properties:
+            return self._no_results_for_price(max_price, conv)
+        
+        # Resposta precisa
+        response = f"Encontrei {len(properties)} {'imóvel' if len(properties) == 1 else 'imóveis'} "
+        
+        if min_price:
+            response += f"entre R$ {min_price:,.0f} e R$ {max_price:,.0f}:\n\n"
         else:
-            response = self.ai_service.generate_response(text)
+            response += f"abaixo de R$ {max_price:,.0f}:\n\n"
         
-        # 7. ADICIONA URGÊNCIA SE APROPRIADO
-        if lead_analysis['score'] >= 50:
-            urgency = self.urgency_creator.create_urgency(from_number)
-            if urgency:
-                response += f"\n\n{urgency}"
+        for i, prop in enumerate(properties[:5], 1):
+            valor_num = self._parse_price(prop['preco'])
+            response += f"{i}. {prop['tipo']} em {prop['bairro']}\n"
+            response += f"   {e('money')} R$ {prop['preco']}\n"
+            response += f"   {e('casa')} {prop['quartos']} quartos | {prop.get('area', '??')}m²\n"
+            response += f"   {e('key')} Código: {prop['codigo']}\n\n"
         
-        # 8. SALVA RESPOSTA NO HISTÓRICO
-        self.conversation_history[from_number].append({
-            'text': response,
-            'timestamp': datetime.now(),
-            'from': 'bot'
-        })
+        if len(properties) > 5:
+            response += f"... e mais {len(properties) - 5} opções!\n\n"
         
-        # 9. AGENDA FOLLOW-UP AUTOMÁTICO
-        self._schedule_followup(from_number, lead_analysis)
+        response += f"{e('bulb')} Digite o código para ver detalhes e fotos!"
+        
+        # Salva contexto
+        conv['preferences'] = preferences
+        conv['last_search'] = f"imoveis ate {max_price}"
         
         return response
     
-    def _handle_broker_commands(self, command: str, from_number: str) -> str:
-        """Comandos especiais para corretores"""
+    def _no_results_for_price(self, max_price, conv):
+        """Resposta honesta quando não há resultados"""
+        # Busca o mais barato disponível
+        all_properties = self.property_service.get_all_properties()
         
-        parts = command.split()
-        cmd = parts[0].lower()
+        if not all_properties:
+            return f"Desculpe, não encontrei imóveis no momento. {e('thinking')}"
         
-        if cmd == '#status':
-            # Mostra status do lead
-            client_name = ' '.join(parts[1:]) if len(parts) > 1 else from_number
-            analysis = self.lead_scorer.get_full_analysis(client_name)
-            
-            return f"""📊 STATUS DO LEAD: {client_name}
-
-🔥 Score: {analysis['score']}/100
-📈 Classificação: {analysis['classification']}
-💡 Próxima ação: {analysis['next_action']}
-⏰ Melhor horário contato: {analysis['best_contact_time']}
-📱 Último contato: {analysis['last_contact']}
-
-SINAIS DETECTADOS:
-{self._format_signals(analysis['signals'])}
-
-RECOMENDAÇÃO: {analysis['recommendation']}"""
+        # Encontra o mais barato
+        cheapest = min(all_properties, key=lambda x: self._parse_price(x['preco']))
+        cheapest_price = self._parse_price(cheapest['preco'])
         
-        elif cmd == '#comparar':
-            # Compara imóveis
-            properties = parts[1:]
-            comparison = self.property_service.compare_properties(properties)
-            return comparison
+        response = f"Não encontrei imóveis abaixo de R$ {max_price:,.0f}. {e('thinking')}\n\n"
         
-        elif cmd == '#fechar':
-            # Script de fechamento
-            client_name = ' '.join(parts[1:])
-            script = self._generate_closing_script(client_name)
-            return script
-        
-        elif cmd == '#urgencia':
-            # Cria urgência
-            property_code = parts[1] if len(parts) > 1 else 'AP001'
-            urgency = self.urgency_creator.create_for_property(property_code)
-            return urgency
-        
-        elif cmd == '#demo':
-            # Modo demonstração
-            return self._run_demo_mode()
-        
-        return "Comando não reconhecido. Comandos disponíveis: #status, #comparar, #fechar, #urgencia, #demo"
-    
-    def _is_price_only_request(self, text: str) -> bool:
-        """Detecta se só quer saber preço"""
-        price_patterns = [
-            'quanto custa', 'qual o preço', 'qual valor',
-            'só quero saber o preço', 'me passa o valor',
-            'quanto é', 'quanto ta', 'valor?'
-        ]
-        text_lower = text.lower()
-        return any(pattern in text_lower for pattern in price_patterns) and len(text) < 50
-    
-    def _handle_price_request(self, text: str, from_number: str) -> str:
-        """Resposta inteligente para pedido de preço"""
-        
-        # Identifica o imóvel
-        property_code = self._extract_property_code(text) or 'AP001'
-        property_data = self.property_service.get_property(property_code)
-        
-        # Perfil do cliente
-        profile = self._analyze_client_profile(from_number)
-        
-        if profile.get('first_time_buyer'):
-            hook = f"""💰 R$ {property_data['preco']} - Mas espera! 🤚
-
-Esse valor INCLUI:
-✅ IPTU e condomínio por 3 meses
-✅ Mudança grátis  
-✅ Pintura de 1 cômodo
-
-E o MELHOR: com R$ 15.000 você já consegue a entrada!
-Parcelas de R$ 2.100 (menos que aluguel!)
-
-📱 Quer saber como? Posso te ligar em 5 minutos?"""
-        
-        elif profile.get('investor'):
-            hook = f"""💰 R$ {property_data['preco']} - Mas veja o RETORNO! 📈
-
-• Aluguel atual: R$ 2.800/mês
-• ROI: 7.4% ao ano (acima da poupança!)
-• Valorização prevista: 15% em 2 anos
-• Já tem inquilino interessado!
-
-📊 Posso te enviar a planilha completa de retorno?"""
-        
+        if cheapest_price < max_price * 1.5:  # Se está relativamente próximo
+            response += f"Mas tenho uma opção próxima do seu orçamento:\n\n"
+            response += f"{e('sparkles')} {cheapest['tipo']} em {cheapest['bairro']}\n"
+            response += f"{e('money')} R$ {cheapest['preco']} (apenas R$ {cheapest_price - max_price:,.0f} acima)\n"
+            response += f"{e('casa')} {cheapest['quartos']} quartos\n"
+            response += f"{e('key')} Código: {cheapest['codigo']}\n\n"
+            response += "Às vezes vale a pena esticar um pouquinho o orçamento! Quer ver?"
         else:
-            hook = f"""💰 R$ {property_data['preco']} - E tem BÔNUS! 🎁
-
-APENAS ESSA SEMANA:
-• Cozinha planejada (valor R$ 15.000)
-• Ar condicionado nos quartos
-• 1 vaga extra de garagem
-
-⚠️ Já tem 3 propostas! Não quero que perca.
-
-📱 Que tal uma visita virtual AGORA? Faço pelo WhatsApp!"""
-        
-        # Agenda follow-up automático
-        self._schedule_followup(from_number, {'type': 'price_request', 'property': property_code})
-        
-        return hook
-    
-    def _detect_excuse(self, text: str) -> str:
-        """Detecta desculpas comuns"""
-        excuses = {
-            'caro': ['muito caro', 'ta caro', 'fora do orçamento', 'não tenho esse valor'],
-            'pensar': ['preciso pensar', 'vou pensar', 'deixa eu ver', 'depois eu falo'],
-            'outros': ['vou ver outros', 'to vendo outros', 'tem outros pra ver'],
-            'conjuge': ['falar com esposa', 'falar com marido', 'conversar em casa'],
-            'momento': ['não é o momento', 'agora não', 'mais pra frente', 'ano que vem']
-        }
-        
-        text_lower = text.lower()
-        for excuse_type, patterns in excuses.items():
-            for pattern in patterns:
-                if pattern in text_lower:
-                    return excuse_type
-        return None
-    
-    def _detect_competitor(self, text: str) -> str:
-        """Detecta menção a concorrentes"""
-        competitors = [
-            'quintoandar', 'quinto andar', 'zap', 'olx', 
-            'outra imobiliária', 'outro corretor', 'já estou vendo'
-        ]
-        text_lower = text.lower()
-        for comp in competitors:
-            if comp in text_lower:
-                return comp
-        return None
-    
-    def _handle_competitor_mention(self, competitor: str, from_number: str) -> str:
-        """Resposta quando menciona concorrente"""
-        
-        responses = {
-            'quintoandar': """Entendo que está vendo com o QuintoAndar! 
-
-Mas sabia que conosco você tem:
-✅ ZERO taxa de serviço (economia de R$ 2.400!)
-✅ Corretor dedicado 24/7 (não robô)
-✅ 40% mais opções exclusivas
-✅ Negociação direta com proprietário
-
-🎁 OFERTA: Se fechar conosco hoje, primeira mensalidade GRÁTIS!
-
-Posso te mostrar opções melhores e mais baratas agora?""",
-            
-            'default': """Legal que está pesquisando! 😊
-
-Adoraria mostrar nossos DIFERENCIAIS:
-✅ Imóveis exclusivos (não estão em outros lugares)
-✅ Condições especiais de pagamento
-✅ Tour virtual 360° de todos
-✅ Garantia de satisfação
-
-🎁 Como você já está procurando, tenho uma condição ESPECIAL.
-
-Posso te apresentar 3 opções premium que acabaram de chegar?"""
-        }
-        
-        # Alerta para corretor
-        self._send_competitor_alert(from_number, competitor)
-        
-        return responses.get(competitor, responses['default'])
-    
-    def _is_returning_ghost(self, from_number: str) -> bool:
-        """Verifica se é cliente que sumiu e voltou"""
-        history = self.conversation_history.get(from_number, [])
-        if len(history) < 2:
-            return False
-        
-        # Pega última interação
-        last_interaction = history[-2]['timestamp']
-        time_away = datetime.now() - last_interaction
-        
-        return time_away.total_seconds() > 86400  # Mais de 24h
-    
-    def _handle_ghost_return(self, from_number: str) -> str:
-        """Mensagem para quem sumiu e voltou"""
-        
-        templates = [
-            """Que bom que voltou! 😊
-
-Tenho NOVIDADES sobre o que você procura:
-🏠 3 imóveis novos na sua faixa de preço
-💰 Condição especial esse mês
-📸 Tours virtuais disponíveis
-
-O que achou mais importante na sua busca?""",
-
-            """Oi! Estava esperando você! 🎯
-
-Lembra do imóvel que você gostou? 
-Consegui uma condição ESPECIAL:
-✅ Entrada facilitada em 10x
-✅ Desconto de 5% à vista
-✅ IPTU 2024 grátis
-
-Ainda está interessado?""",
-
-            """Olá novamente! 😊
-
-Separei algumas opções MELHORES desde nossa última conversa:
-📍 2 lançamentos na região que você queria
-💎 1 oportunidade única (proprietário com urgência)
-
-Quer ver? Garanto que vai gostar!"""
-        ]
-        
-        import random
-        return random.choice(templates)
-    
-    def _handle_property_search_smart(self, intent_data: dict, from_number: str) -> str:
-        """Busca inteligente com lead scoring"""
-        
-        # Busca normal
-        properties = self.property_service.search_properties(intent_data.get('parameters', {}))
-        
-        # Adiciona inteligência
-        lead_score = self.lead_scorer.get_score(from_number)
-        
-        if lead_score >= 70:
-            # Cliente quente - adiciona urgência
-            properties += "\n\n🔥 ATENÇÃO: Estes imóveis estão com alta procura! Sugiro agendarmos visita ainda hoje."
-        elif lead_score >= 50:
-            # Cliente morno - adiciona benefício
-            properties += "\n\n🎁 BENEFÍCIO EXCLUSIVO: Identificamos que você é um cliente especial. Tenho condições diferenciadas!"
-        
-        return properties
-    
-    def _handle_smart_scheduling(self, text: str, from_number: str) -> str:
-        """Agendamento inteligente com confirmação"""
-        
-        response = """📅 Perfeito! Vamos agendar sua visita!
-
-Tenho estes horários HOJE:
-🕐 14:00 - Disponível ✅
-🕑 16:00 - Disponível ✅  
-🕒 18:00 - Disponível ✅
-
-Qual prefere? 
-
-💡 Dica: Quem confirma agora ganha:
-• Relatório completo do bairro
-• Análise de valorização
-• Cafézinho na visita ☕"""
-        
-        # Agenda confirmações automáticas
-        self._schedule_visit_confirmations(from_number)
+            response += f"O imóvel mais em conta que tenho custa R$ {cheapest['preco']}.\n\n"
+            response += "Posso te mostrar algumas opções de financiamento que cabem no seu bolso?"
         
         return response
     
-    def _send_hot_lead_alert(self, from_number: str, analysis: dict) -> None:
-        """Envia alerta de lead quente para corretor"""
-        alert = f"""
-🔥🔥🔥 LEAD QUENTE DETECTADO! 🔥🔥🔥
-
-Cliente: {from_number}
-Score: {analysis['score']}/100
-Sinais: {', '.join(analysis['signals'][:3])}
-
-AÇÃO RECOMENDADA: {analysis['action']}
-Probabilidade de fechar: {analysis['close_probability']}
-
-📱 LIGAR AGORA! Script disponível no sistema.
-"""
-        logger.info(alert)
-        # Aqui você pode integrar com Slack, SMS, etc.
+    def _parse_price(self, price_str):
+        """Converte string de preço para número"""
+        try:
+            # Remove R$, pontos e converte vírgula
+            clean = price_str.replace('R$', '').replace('.', '').replace(',', '.').strip()
+            return float(clean)
+        except:
+            return 999999999
     
-    def _send_competitor_alert(self, from_number: str, competitor: str) -> None:
-        """Alerta quando cliente menciona concorrente"""
-        alert = f"""
-⚠️ ALERTA: CONCORRENTE MENCIONADO!
-
-Cliente: {from_number}
-Concorrente: {competitor}
-Ação: LIGAR EM 5 MINUTOS!
-
-Use o script anti-concorrência #3
-"""
-        logger.info(alert)
+    def _is_property_search(self, text):
+        text_lower = text.lower()
+        search_words = ['procuro', 'quero', 'preciso', 'busco', 'tem', 'existe',
+                       'apartamento', 'casa', 'kitnet', 'cobertura',
+                       'comprar', 'alugar', 'quartos', 'bairro']
+        return any(word in text_lower for word in search_words)
     
-    def _schedule_followup(self, from_number: str, context: dict) -> None:
-        """Agenda follow-up automático"""
-        # Aqui você integraria com seu sistema de agendamento
-        logger.info(f"Follow-up agendado para {from_number}: {context}")
-    
-    def _schedule_visit_confirmations(self, from_number: str) -> None:
-        """Agenda confirmações de visita"""
-        # Sistema de confirmação em 3 etapas
-        confirmations = [
-            (timedelta(hours=1), "Visita confirmada! Salvou no calendário?"),
-            (timedelta(days=1), "Oi! Confirma nossa visita amanhã?"),
-            (timedelta(hours=2), "Nos vemos em 2 horas! 📍 Endereço: ...")
-        ]
-        logger.info(f"Confirmações agendadas para {from_number}")
-    
-    def _extract_property_code(self, text: str) -> str:
-        """Extrai código do imóvel do texto"""
-        pattern = r'\b(AP|CA)\d{3,4}\b'
-        matches = re.findall(pattern, text.upper())
-        return matches[0] if matches else None
-    
-    def _analyze_client_profile(self, from_number: str) -> dict:
-        """Analisa perfil do cliente"""
-        # Análise baseada no histórico
-        history = self.conversation_history.get(from_number, [])
+    def _smart_search(self, text, conv):
+        """Busca inteligente sem inventar dados"""
+        preferences = self._extract_preferences(text)
+        conv['preferences'].update(preferences)
+        conv['last_search'] = text
         
-        profile = {
-            'first_time_buyer': any('primeiro' in str(m).lower() or 'primeira vez' in str(m).lower() for m in history),
-            'investor': any('invest' in str(m).lower() or 'renda' in str(m).lower() for m in history),
-            'family': any('família' in str(m).lower() or 'filhos' in str(m).lower() for m in history),
-            'urgent': any('urgent' in str(m).lower() or 'rápido' in str(m).lower() for m in history)
-        }
+        properties = self.property_service.search_with_preferences(conv['preferences'])
         
-        return profile
+        if not properties:
+            return self._no_results_response(conv)
+        
+        # Confirma o que entendeu
+        understood = self._explain_search(conv['preferences'])
+        
+        response = f"{understood}\n\n"
+        response += f"Encontrei {len(properties)} {'opção' if len(properties) == 1 else 'opções'}:\n\n"
+        
+        for i, prop in enumerate(properties[:5], 1):
+            response += f"{i}. {prop['tipo']} em {prop['bairro']}\n"
+            response += f"   {e('money')} R$ {prop['preco']}\n"
+            response += f"   {e('casa')} {prop['quartos']} quartos\n"
+            if prop.get('destaque'):
+                response += f"   {e('star')} {prop['destaque']}\n"
+            response += f"   {e('key')} Código: {prop['codigo']}\n\n"
+        
+        response += f"\n{e('bulb')} Digite o código para ver detalhes completos!"
+        
+        return response
     
-    def _format_signals(self, signals: list) -> str:
-        """Formata sinais detectados"""
-        return '\n'.join([f"• {signal}" for signal in signals])
+    def _explain_search(self, preferences):
+        """Explica o que entendeu da busca"""
+        parts = []
+        
+        if preferences.get('tipo'):
+            parts.append(preferences['tipo'])
+        
+        if preferences.get('operacao'):
+            parts.append(f"para {preferences['operacao']}")
+        
+        if preferences.get('quartos'):
+            parts.append(f"com {preferences['quartos']}+ quartos")
+        
+        if preferences.get('max_price'):
+            parts.append(f"até R$ {preferences['max_price']:,.0f}")
+        
+        if preferences.get('bairro'):
+            parts.append(f"em {preferences['bairro']}")
+        
+        if parts:
+            return f"Entendi! Você busca {' '.join(parts)}."
+        else:
+            return "Vou mostrar todas as opções disponíveis:"
     
-    def _generate_closing_script(self, client_name: str) -> str:
-        """Gera script de fechamento personalizado"""
-        return f"""📝 SCRIPT DE FECHAMENTO - {client_name}
-
-ABERTURA:
-"{client_name}, analisando tudo que conversamos, o AP001 é PERFEITO para você porque..."
-
-BENEFÍCIOS PRINCIPAIS:
-✅ Está dentro do seu orçamento
-✅ Tem os 3 quartos que precisa
-✅ Localização que você pediu
-
-CRIAÇÃO DE URGÊNCIA:
-"Preciso ser transparente: recebi 2 consultas sobre esse imóvel hoje..."
-
-FECHAMENTO:
-"O que precisamos resolver para você pegar as chaves do SEU novo lar?"
-
-TRATAMENTO DE OBJEÇÕES:
-💰 Preço: "Veja, o aluguel aqui é R$ 2.500. A parcela fica em R$ 2.300..."
-🤔 Pensar: "Claro! Mas deixa eu reservar 24h no seu nome..."
-👥 Cônjuge: "Perfeito! Vamos fazer uma chamada de vídeo agora?"
-
-BOA SORTE! 🍀"""
+    def _show_property_details(self, code, conv):
+        """Mostra detalhes REAIS do imóvel"""
+        prop = self.property_service.get_property_details(code)
+        
+        if not prop:
+            # Busca códigos similares
+            all_codes = self.property_service.get_all_codes()
+            similar = [c for c in all_codes if c.startswith(code[:2])]
+            
+            if similar:
+                return f"Não encontrei {code}. Você quis dizer {' ou '.join(similar[:3])}?"
+            else:
+                return f"Código {code} não encontrado. Digite 'ajuda' para ver os códigos disponíveis."
+        
+        response = f"{e('casa')} **{prop['tipo']} - {prop['codigo']}**\n"
+        response += f"{e('location')} {prop['bairro']}, {prop.get('cidade', 'Florianópolis')}\n\n"
+        response += f"{prop['descricao']}\n\n"
+        response += f"{e('money')} **Valor:** R$ {prop['preco']}\n"
+        response += f"🛏️ **Quartos:** {prop['quartos']}\n"
+        
+        if prop.get('suites'):
+            response += f"🚿 **Suítes:** {prop['suites']}\n"
+        
+        if prop.get('area'):
+            response += f"📐 **Área:** {prop['area']}m²\n"
+        
+        if prop.get('vagas'):
+            response += f"🚗 **Vagas:** {prop['vagas']}\n"
+        
+        response += f"\n📸 Digite 'fotos' para ver imagens"
+        response += f"\n📅 Digite 'visitar' para agendar visita"
+        
+        conv['context'] = {'viewing': code}
+        
+        return response
     
-    def _run_demo_mode(self) -> str:
-        """Executa demonstração ao vivo"""
-        return """🎭 MODO DEMONSTRAÇÃO ATIVADO!
+    def _handle_photo_request(self, text, conv):
+        """Mostra fotos se existirem"""
+        context = conv.get('context', {})
+        viewing = context.get('viewing')
+        
+        if not viewing:
+            return "Qual imóvel você quer ver as fotos? Me passe o código."
+        
+        photos = self.property_service.get_property_photos_list(viewing)
+        
+        if photos:
+            return {
+                "text": f"Fotos do {viewing}:",
+                "media": photos[:3]
+            }
+        else:
+            return f"Ainda não temos fotos do {viewing}, mas posso agendar uma visita presencial!"
+    
+    def _first_interaction(self):
+        return f"""Olá! Sou o Tony, seu assistente imobiliário! {e('wave')}
 
-Vou simular uma conversa completa mostrando todas as features:
+Como posso ajudar?
+- Buscar imóveis para comprar ou alugar
+- Filtrar por preço, quartos, bairro
+- Ver fotos e agendar visitas
 
-1️⃣ CLIENTE: "Oi, quanto custa o AP001?"
-   BOT: [Resposta com gancho além do preço]
-
-2️⃣ CLIENTE: "Tá caro, preciso pensar"
-   BOT: [Conversão de objeção]
-   SISTEMA: [Alerta de objeção para corretor]
-
-3️⃣ CLIENTE: "Tô vendo com a QuintoAndar também"
-   BOT: [Contra-ataque à concorrência]
-   SISTEMA: [🔥 ALERTA URGENTE]
-
-4️⃣ CLIENTE: "Ok, quero visitar"
-   BOT: [Agendamento com confirmação tripla]
-   SISTEMA: [Lead marcado como QUENTE - 85/100]
-
-Impressionante, né? 😎"""
+O que você procura hoje?"""
+    
+    def _greeting_response(self):
+        return f"Oi! Como posso ajudar você hoje? {e('smile')}"
+    
+    def _contextual_response(self, text, conv):
+        """Resposta contextual sem inventar"""
+        # Se tem contexto de visualização
+        if conv.get('context', {}).get('viewing'):
+            code = conv['context']['viewing']
+            return f"Ainda está vendo o {code}? Digite 'fotos' para ver imagens ou 'visitar' para agendar!"
+        
+        # Resposta genérica
+        return f"Não entendi bem. Você pode:\n• Buscar: 'quero apartamento 2 quartos'\n• Filtrar: 'abaixo de 500 mil'\n• Ver código: 'AP001'\n\nComo posso ajudar? {e('smile')}"
+    
+    def _no_results_response(self, conv):
+        """Resposta honesta quando não há resultados"""
+        criteria = conv.get('preferences', {})
+        
+        response = f"Não encontrei imóveis com todos esses critérios. {e('thinking')}\n\n"
+        
+        # Sugere relaxar filtros
+        if criteria.get('quartos') and criteria.get('quartos') > 2:
+            response += f"• Tenho opções com {criteria['quartos']-1} quartos\n"
+        
+        if criteria.get('max_price'):
+            response += f"• Ou com preços um pouco acima de R$ {criteria['max_price']:,.0f}\n"
+        
+        response += "\nQuer ajustar a busca?"
+        
+        return response
+    
+    def _error_response(self):
+        return f"Ops! Algo deu errado. {e('sweat')} Digite 'oi' para recomeçar!"
+    
+    def _extract_property_code(self, text):
+        match = re.search(r'\b(AP|CA)\d{3,4}\b', text.upper())
+        return match.group() if match else None
+    
+    def _extract_preferences(self, text):
+        prefs = {}
+        text_lower = text.lower()
+        
+        # Tipo
+        if 'apartamento' in text_lower:
+            prefs['tipo'] = 'apartamento'
+        elif 'casa' in text_lower:
+            prefs['tipo'] = 'casa'
+        
+        # Operação
+        if any(word in text_lower for word in ['comprar', 'compra', 'venda']):
+            prefs['operacao'] = 'venda'
+        elif any(word in text_lower for word in ['alugar', 'aluguel', 'locar']):
+            prefs['operacao'] = 'aluguel'
+        
+        # Quartos
+        quartos_match = re.search(r'(\d+)\s*quarto', text_lower)
+        if quartos_match:
+            prefs['quartos'] = int(quartos_match.group(1))
+        
+        # Bairro
+        bairros = ['centro', 'trindade', 'agronômica', 'campeche', 'jurerê']
+        for bairro in bairros:
+            if bairro in text_lower:
+                prefs['bairro'] = bairro
+                break
+        
+        return prefs

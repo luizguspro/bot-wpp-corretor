@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 from openai import OpenAI
 
@@ -7,110 +6,73 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
-        self.client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
-        self.model = "gpt-4o-mini"
+        api_key = os.environ.get('OPENAI_API_KEY')
+        if api_key:
+            self.client = OpenAI(api_key=api_key)
+            self.model = "gpt-4o-mini"
+        else:
+            self.client = None
+            logger.warning("OpenAI API key não configurada - usando respostas padrão")
     
-    def classify_intent(self, text: str) -> dict:
-        """Classifica a intenção da mensagem"""
+    def generate_contextual_response(self, text, context):
+        """Gera resposta com contexto da conversa"""
+        if not self.client:
+            return self._fallback_response(text)
+        
         try:
-            # Detecção rápida de intenções comuns
-            text_lower = text.lower()
+            system_prompt = f"""Você é o Tony, um corretor de imóveis carismático e prestativo.
             
-            # Como vocês podem ajudar = info sobre a empresa
-            if any(phrase in text_lower for phrase in ['como vocês', 'como vcs', 'o que fazem', 'quais serviços']):
-                return {"intent": "company_info", "parameters": {"info_type": "about"}}
+Contexto da conversa:
+- Nome do cliente: {context.get('name', 'não informado')}
+- Preferências: {context.get('preferences', {})}
+- Última busca: {context.get('last_search', 'nenhuma')}
+
+Seja entusiasmado, útil e sempre sugira próximos passos.
+Use emojis com moderação.
+Máximo 3 frases."""
             
-            # Busca de imóveis
-            if any(word in text_lower for word in ['procuro', 'quero', 'preciso', 'busco']):
-                params = {}
-                if 'apartamento' in text_lower:
-                    params['tipo'] = 'apartamento'
-                elif 'casa' in text_lower:
-                    params['tipo'] = 'casa'
-                
-                if 'comprar' in text_lower or 'venda' in text_lower:
-                    params['operacao'] = 'venda'
-                elif 'alugar' in text_lower or 'aluguel' in text_lower:
-                    params['operacao'] = 'aluguel'
-                
-                # Extrai número de quartos
-                import re
-                quartos_match = re.search(r'(\d+)\s*quarto', text_lower)
-                if quartos_match:
-                    params['quartos'] = int(quartos_match.group(1))
-                
-                return {"intent": "property_search", "parameters": params}
-            
-            # Fotos
-            if any(word in text_lower for word in ['foto', 'imagem', 'ver', 'mostra']):
-                return {"intent": "show_photos", "parameters": {}}
-            
-            # Contato
-            if any(word in text_lower for word in ['contato', 'telefone', 'endereço', 'horário']):
-                return {"intent": "company_info", "parameters": {"info_type": "contato"}}
-            
-            # Financiamento
-            if 'financiamento' in text_lower:
-                return {"intent": "company_info", "parameters": {"info_type": "financiamento"}}
-            
-            # Script de vendas
-            if 'script' in text_lower and any(word in text_lower for word in ['venda', 'corretor']):
-                return {"intent": "sales_script", "parameters": {}}
-            
-            # Caso geral - usa GPT para classificar
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": """Classifique a intenção em:
-                        - property_search: busca por imóveis
-                        - company_info: informações sobre a empresa
-                        - sales_script: ajuda com vendas
-                        - general: outros assuntos
-                        
-                        Retorne JSON: {"intent": "categoria", "parameters": {}}"""
-                    },
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text}
                 ],
-                temperature=0.3,
+                temperature=0.8,
                 max_tokens=150
-            )
-            
-            result = json.loads(response.choices[0].message.content)
-            return result
-            
-        except Exception as e:
-            logger.error(f"Erro na classificação: {str(e)}")
-            return {"intent": "general", "parameters": {}}
-    
-    def generate_response(self, text: str) -> str:
-        """Gera resposta usando IA para casos gerais"""
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """Você é um assistente virtual de uma imobiliária.
-                        Seja sempre educado, profissional e prestativo.
-                        Responda de forma concisa e clara.
-                        Sempre termine oferecendo ajuda para encontrar imóveis."""
-                    },
-                    {"role": "user", "content": text}
-                ],
-                temperature=0.7,
-                max_tokens=200
             )
             
             return response.choices[0].message.content
             
         except Exception as e:
-            logger.error(f"Erro ao gerar resposta: {str(e)}")
-            return "Como posso ajudar você a encontrar o imóvel ideal?"
+            logger.error(f"Erro AI: {e}")
+            return self._fallback_response(text)
     
-    def transcribe_audio(self, audio_path: str) -> str:
+    def _fallback_response(self, text):
+        """Resposta quando AI não está disponível"""
+        text_lower = text.lower()
+        
+        if 'obrigado' in text_lower or 'obrigada' in text_lower:
+            return "Por nada! Foi um prazer ajudar! Qualquer coisa é só chamar! 😊"
+        elif 'tchau' in text_lower or 'até' in text_lower:
+            return "Até logo! Foi ótimo conversar com você! Volte sempre! 👋"
+        elif '?' in text:
+            return "Ótima pergunta! Me conta mais detalhes para eu poder ajudar melhor!"
+        elif any(word in text_lower for word in ['sim', 'quero', 'gostei']):
+            return "Que legal! Vamos em frente então! Como posso ajudar?"
+        elif any(word in text_lower for word in ['não', 'nao']):
+            return "Sem problemas! Que tal tentarmos outra opção?"
+        else:
+            return "Entendi! Como posso ajudar você com isso?"
+    
+    def generate_response(self, text):
+        """Método de compatibilidade"""
+        return self.generate_contextual_response(text, {})
+    
+    def transcribe_audio(self, audio_path):
         """Transcreve áudio usando Whisper"""
+        if not self.client:
+            return ""
+        
         try:
             with open(audio_path, 'rb') as audio_file:
                 transcript = self.client.audio.transcriptions.create(
@@ -118,9 +80,7 @@ class AIService:
                     file=audio_file,
                     language="pt"
                 )
-            
             return transcript.text
-            
         except Exception as e:
-            logger.error(f"Erro na transcrição: {str(e)}")
+            logger.error(f"Erro transcrição: {e}")
             return ""
